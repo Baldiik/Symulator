@@ -1,0 +1,12 @@
+{
+  "name": "ryzykownia",
+  "private": true,
+  "type": "module",
+  "description": "Ryzykownia: gry o ryzyku z zapisem wyników na Netlify (Functions + Blobs)",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.9"
+  }
+}
