@@ -38,6 +38,10 @@ Hasło ustawiasz tak samo jak w kroku 4 (w panelu Netlify albo `npx netlify-cli 
 
 - Student wpisuje imię (przy włączonym zapisie jest obowiązkowe) i gra. Gra sama wysyła pełną historię co ok. 15 s i zaraz po zakończeniu. W pasku na górze widać „Zapisano 12:03”.
 - Ty otwierasz **Panel wyników**, wpisujesz hasło i widzisz wszystkie sesje z wybranego dnia. Odświeżają się co 30 s.
+- Nad tabelą są trzy zakładki:
+  - **Ranking ogólny**: wszystkie sesje od najlepszego wyniku.
+  - **Grupy: start w ciągu 30 min**: osobny ranking dla każdej gry i każdej grupy osób, które zaczęły w ciągu 30 minut od pierwszej osoby w grupie (np. jedna lekcja).
+  - **Ranking z usuwaniem**: zaznaczasz wyniki (pojedynczo, wszystkie, przerwane albo bez ruchów) i usuwasz je z serwera. W zakładce Grupy przycisk „Zaznacz do usunięcia” zaznacza całą grupę naraz.
 - **Cała historia → zakładka Weryfikacja** pokazuje, co sprawdził serwer:
   - saldo przeliczone z pełnej historii (wszystkie gry),
   - ruletka i moneta: każde losowanie odtworzone z kodu stołu, więc podmienionej liczby nie da się ukryć,
@@ -47,7 +51,7 @@ Hasło ustawiasz tak samo jak w kroku 4 (w panelu Netlify albo `npx netlify-cli 
   - flagi: zmiana wyniku po zakończeniu gry, zmiana imienia w trakcie, „to samo urządzenie co: …”.
 - Zakończona sesja jest zamknięta. Późniejsze próby jej zmiany serwer tylko odnotowuje.
 - **Pobierz JSON (archiwum)** zapisuje pełne dane wszystkich sesji z dnia na Twój komputer. **Kopiuj jako CSV** daje tabelę do arkusza.
-- Pojedynczą sesję (np. próbną) usuniesz w zakładce Weryfikacja, przyciskiem „Usuń z serwera”.
+- Usunięcia nie da się cofnąć. Przed czyszczeniem danych pobierz archiwum JSON.
 
 ## Uwagi
 

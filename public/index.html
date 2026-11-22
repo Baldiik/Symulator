@@ -898,6 +898,16 @@ textarea#repText,textarea#ruText,textarea#slText,textarea#cnText{height:130px}
 .srvrow label.ck{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;color:var(--muted)}
 .chk-list td:first-child{white-space:normal;min-width:220px}
 .chk-list td:last-child{white-space:normal;min-width:200px}
+.bview{border-bottom:0}
+.bview .tab{font-size:13.5px}
+.bdel{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--panel)}
+.bdel .hint{flex-basis:100%;margin:2px 0 0}
+#bTables{display:flex;flex-direction:column;gap:14px}
+table.data th.cks,table.data td.cks{width:30px;padding-right:2px}
+table.data .cks input{width:16px;height:16px;margin:0;vertical-align:middle;accent-color:var(--down)}
+table.data tr.sel td{background:var(--down-bg)}
+.bgrp .ph h3{color:var(--fg)}
+.bgrp .ph .hint{flex:1;min-width:200px}
 .vflag{display:block;margin-top:3px;font-size:11.5px;color:var(--warn);white-space:normal}
 .nickreq{color:var(--down)!important;font-weight:600}
 </style>
@@ -1685,7 +1695,21 @@ textarea#repText,textarea#ruText,textarea#slText,textarea#cnText{height:130px}
     <button class="btn sm" id="bCsv" type="button">Kopiuj jako CSV</button>
     <button class="btn sm" id="bClear" type="button">Wyczyść panel</button>
   </div>
-  <div class="panel"><div class="scroll"><table class="data"><thead><tr><th class="r">#</th><th>Uczestnik</th><th>Historia</th><th>Tryb</th><th>Kod</th><th>Status</th><th class="r">Start</th><th class="r">Teraz</th><th class="r">Wynik</th><th class="r">Transakcje / gry</th><th class="r">Maks. obsunięcie</th><th>Kod wyniku</th><th class="r">Aktualizacja</th></tr></thead><tbody id="bBody"></tbody></table></div></div>
+  <div class="tabs bview" id="bView" role="tablist" aria-label="Widok wyników">
+    <button class="tab on" type="button" role="tab" data-bv="all">Ranking ogólny</button>
+    <button class="tab" type="button" role="tab" data-bv="grp">Grupy: start w ciągu 30 min<span class="cnt" id="bGrpCnt"></span></button>
+    <button class="tab" type="button" role="tab" data-bv="del">Ranking z usuwaniem<span class="cnt" id="bDelCnt"></span></button>
+  </div>
+  <div class="bdel" id="bDelBar" hidden>
+    <button class="btn sm" type="button" data-bsel="all">Zaznacz wszystkie</button>
+    <button class="btn sm" type="button" data-bsel="stale">Zaznacz przerwane</button>
+    <button class="btn sm" type="button" data-bsel="empty">Zaznacz bez ruchów</button>
+    <button class="btn sm" type="button" data-bsel="none">Odznacz</button>
+    <span style="flex:1"></span>
+    <button class="btn sm danger" type="button" id="bDelGo" disabled>Usuń zaznaczone</button>
+    <p class="hint">Usuwa wyniki z serwera na stałe (i wklejone z tej przeglądarki). Działa na wiersze widoczne przy wybranych filtrach. Sesja, która wciąż trwa, zapisze się ponownie przy następnym ruchu studenta.</p>
+  </div>
+  <div id="bTables"></div>
   <p class="tk-msg" id="bMsg" role="status"></p>
   <div class="gstats" id="bGroup"></div>
   <div class="panel">
@@ -1908,7 +1932,7 @@ function fireNews(n,ev){
     I.pendingJump+=j;I.boost=Math.max(I.boost,1.8+rnd()*1.5);I.sprBoost=Math.max(I.sprBoost,3);react.push([k,j])}
   S.news.unshift({t:S.t,h:n.h,ev:ev?ev.h:null,react,flip});S.ver.news++;
   addLog((ev?'Kalendarz: ':'Pilne: ')+n.h,'news');
-  toast(ev?'Z kalendarza':'Pilna wiadomość',n.h,'news');
+  /* bez wyskakujących powiadomień: wiadomość trafia do zakładki Wiadomości, dziennika i paska nad wykresem */
 }
 
 /* ---------- rachunek ---------- */
@@ -2900,8 +2924,9 @@ document.addEventListener('submit',e=>{const f=e.target,sel=f&&NICKF[f.id];if(!S
 for(const sel of Object.values(NICKF)){const inp=$(sel);if(inp)inp.addEventListener('input',()=>{const h=inp.parentElement.querySelector('.hint');if(h)h.classList.remove('nickreq')})}
 
 /* prowadzący: logowanie, lista sesji, szczegóły, kontrole */
-async function api(path,method){
-  const r=await fetch(API+path,{method:method||'GET',cache:'no-store',headers:{authorization:'Bearer '+encodeURIComponent(SRV.pw)}});
+async function api(path,method,body){
+  const h={authorization:'Bearer '+encodeURIComponent(SRV.pw)};if(body)h['content-type']='application/json';
+  const r=await fetch(API+path,{method:method||'GET',cache:'no-store',headers:h,body:body?JSON.stringify(body):undefined});
   const j=await r.json().catch(()=>null);
   if(r.status===401){srvLogout('Nieprawidłowe hasło prowadzącego.');throw new Error('Nieprawidłowe hasło prowadzącego.')}
   if(!r.ok||!j||!j.ok)throw new Error((j&&j.error)||'Błąd serwera (HTTP '+r.status+')');
@@ -2927,7 +2952,7 @@ async function srvLoad(quiet){
 function srvRows(){if(!SRV.pw)return[];const now=Date.now();
   return Object.values(SRV.items).map(it=>{const d=SRV.det[it.key],up=Date.parse(it.updatedAt)||0;
     return{mode:it.mode,nick:it.nick||'Bez imienia',seed:it.seed||'',cap:it.cap,eq:it.eq,n:it.n,dd:it.dd??null,wag:it.wag??null,status:it.status==='done'?'done':'play',src:'server',
-      code:it.code||null,verified:null,seen:up,online:it.status!=='done'&&now-up<120000,key:it.key,chk:it.chk,chkMsg:it.chkMsg||'',flags:it.flags||[],cid:it.cid||'',mach:it.mach||'',
+      code:it.code||null,verified:null,seen:up,start:Date.parse(it.start||it.firstSeen)||up,online:it.status!=='done'&&now-up<120000,key:it.key,chk:it.chk,chkMsg:it.chkMsg||'',flags:it.flags||[],cid:it.cid||'',mach:it.mach||'',
       firstSeen:it.firstSeen,updatedAt:it.updatedAt,saves:it.saves,detail:d&&d.payload?d.payload:null}})}
 const sameDev=(cid,nick)=>cid?[...new Set(Object.values(SRV.items).filter(x=>x.cid===cid&&x.nick&&x.nick.toLowerCase()!==String(nick||'').toLowerCase()).map(x=>x.nick))]:[];
 function srvVerCell(e){
@@ -3018,7 +3043,7 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(B))}catch(e){}}
 function prune(){const now=Date.now();let ch=false;for(const k in B)if(!(now-B[k].seen<TTL)){delete B[k];ch=true}if(ch)save()}
 const clean=s=>String(s||'').replace(/[\u0000-\u001f]/g,'').trim().slice(0,40);
 const num=v=>v===null||v===undefined||v===''?null:(Number.isFinite(+v)?+v:null);
-function upsert(e){const k=e.mode+'|'+e.seed+'|'+e.nick.toLowerCase();B[k]={...(B[k]||{}),...e,seen:Date.now()}}
+function upsert(e){const k=e.mode+'|'+e.seed+'|'+e.nick.toLowerCase();B[k]={...(B[k]||{}),...e,seen:Date.now(),t0:(B[k]&&B[k].t0)||Date.now()}}
 function ingest(d,peer){
   const mode=MODES.includes(d.mode)?d.mode:null;if(!mode)return;
   const realNick=clean(d.nick),nick=realNick||'Bez imienia';
@@ -3069,20 +3094,20 @@ $('#bAdd').addEventListener('click',async()=>{
 let clearArm=0;
 $('#bClear').addEventListener('click',()=>{
   if(Date.now()-clearArm>4000){clearArm=Date.now();$('#bClear').textContent='Na pewno? Kliknij ponownie';setTimeout(()=>{$('#bClear').textContent='Wyczyść panel'},4000);return}
-  B={};save();clearArm=0;$('#bClear').textContent='Wyczyść panel';renderBoard();$('#bMsg').className='tk-msg';$('#bMsg').textContent=SRV.pw?'Usunięto wyniki wklejone ręcznie. Wyniki z serwera zostają (usuniesz je w oknie sesji, zakładka Weryfikacja).':'Panel wyczyszczony.'});
+  B={};save();clearArm=0;$('#bClear').textContent='Wyczyść panel';renderBoard();$('#bMsg').className='tk-msg';$('#bMsg').textContent=SRV.pw?'Usunięto wyniki wklejone ręcznie. Wyniki z serwera zostają (usuniesz je w zakładce Ranking z usuwaniem).':'Panel wyczyszczony.'});
 $('#bMode').addEventListener('change',()=>renderBoard());
 $('#bSeed').addEventListener('change',()=>renderBoard());
 function rows(){
   const fm=$('#bMode').value,fs=$('#bSeed').value;
-  return Object.values(B).concat(srvRows()).filter(e=>(!fm||e.mode===fm)&&(!fs||e.seed===fs))
+  return Object.entries(B).map(([k,e])=>({...e,id:'loc|'+k,start:e.t0||e.seen})).concat(srvRows().map(e=>({...e,id:'srv|'+e.key}))).filter(e=>(!fm||e.mode===fm)&&(!fs||e.seed===fs))
     .map(e=>({...e,ret:e.cap?(e.eq-e.cap)/e.cap*100:null,online:e.src==='server'?e.online:!!(e.peer&&livePeers.has(e.peer))}))
     .sort((a,b)=>(b.ret??-1e9)-(a.ret??-1e9));
 }
 $('#bCsv').addEventListener('click',()=>{
-  const r=rows(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const r=rows(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',gl={};for(const g of groupsOf(r))for(const e of g.list)gl[e.id]=g.label;
   const dec=v=>v==null?'':String(v).replace('.',',');
-  const csv=[['Miejsce','Uczestnik','Tryb','Kod rynku/stołu','Status','Start','Teraz','Wynik %','Transakcje/spiny','Maks. obsunięcie %','Kod wyniku','Zweryfikowany','Źródło','Kontrola serwera','Uwagi serwera','Pierwszy zapis','Ostatni zapis','Urządzenie'].map(q).join(';'),
-    ...r.map((e,i)=>[i+1,e.nick,MODEL[e.mode],e.seed,e.status==='done'?'zakończył':e.src==='server'&&!e.online?'przerwana':'w grze',dec(e.cap),dec(e.eq),e.ret==null?'':e.ret.toFixed(2).replace('.',','),e.n,dec(e.dd),e.code||'',e.verified?'tak':e.verified===false?'nie':'',
+  const csv=[['Miejsce','Uczestnik','Tryb','Kod rynku/stołu','Status','Rozpoczęcie','Grupa (start w ciągu 30 min)','Kapitał','Saldo','Wynik %','Transakcje/spiny','Maks. obsunięcie %','Kod wyniku','Zweryfikowany','Źródło','Kontrola serwera','Uwagi serwera','Pierwszy zapis','Ostatni zapis','Urządzenie'].map(q).join(';'),
+    ...r.map((e,i)=>[i+1,e.nick,MODEL[e.mode],e.seed,e.status==='done'?'zakończył':e.src==='server'&&!e.online?'przerwana':'w grze',e.start?fmtWhen(e.start):'',gl[e.id]||'',dec(e.cap),dec(e.eq),e.ret==null?'':e.ret.toFixed(2).replace('.',','),e.n,dec(e.dd),e.code||'',e.verified?'tak':e.verified===false?'nie':'',
       e.src==='server'?'serwer':e.src==='paste'?'wklejony':'na żywo',e.src!=='server'?'':e.chk===true?'spójne':e.chk===false?'niespójne':'brak danych',e.src==='server'?[e.chkMsg,...(e.flags||[]).map(f=>FLAGL[f]||f)].filter(Boolean).join('; '):'',
       e.firstSeen?fmtWhen(e.firstSeen):'',e.updatedAt?fmtWhen(e.updatedAt):'',e.cid||''].map(q).join(';'))].join('\n');
   const m=$('#bMsg');
@@ -3138,6 +3163,79 @@ function groupHtml(r){
   if(!out.length&&!fm)out.push('<section class="panel"><h3>Statystyki grupy</h3><p class="hint">Pojawią się po wklejeniu pełnych kodów (DZ2:…) z raportów studentów.</p></section>');
   return out.join('');
 }
+/* --- widoki tabeli: ranking ogólny, grupy (start w ciągu 30 min), ranking z usuwaniem --- */
+let BVIEW='all';try{BVIEW=sessionStorage.getItem('dz-bview')||'all'}catch(e){}
+if(!['all','grp','del'].includes(BVIEW))BVIEW='all';
+const BSEL=new Set(),GRP_WIN=30*60000,hhmm=t=>fmtWhen(t).split(' ').pop();
+const sgn=v=>v==null?'—':(v>0?'+':v<0?'−':'')+nf1.format(Math.abs(v))+'%';
+const wyn=n=>n===1?'wynik':(n%10>=2&&n%10<=4&&(n%100<12||n%100>14))?'wyniki':'wyników';
+function groupsOf(r){
+  const by={},out=[];for(const e of r)(by[e.mode]=by[e.mode]||[]).push(e);
+  for(const m in by){let g=null;
+    for(const e of by[m].slice().sort((a,b)=>(a.start||0)-(b.start||0))){
+      if(!g||(e.start||0)-g.t0>GRP_WIN){g={mode:m,t0:e.start||0,t1:e.start||0,list:[]};out.push(g)}
+      g.list.push(e);g.t1=e.start||0}}
+  out.sort((a,b)=>a.t0-b.t0).forEach((g,i)=>{g.no=i+1;g.label=`Grupa ${g.no} · ${MODEL[g.mode]} · ${g.t0?fmtWhen(g.t0)+(hhmm(g.t1)!==hhmm(g.t0)?'–'+hhmm(g.t1):''):'start nieznany'}`;
+    g.list.sort((a,b)=>(b.ret??-1e9)-(a.ret??-1e9))});
+  return out.reverse();
+}
+function bHead(sel,allOn){return`<thead><tr>${sel?`<th class="cks"><input type="checkbox" data-selall${allOn?' checked':''} aria-label="Zaznacz wszystkie"></th>`:''}<th class="r">#</th><th>Uczestnik</th><th>Historia</th><th>Tryb</th><th>Kod</th><th>Status</th><th class="r">Rozpoczęcie</th><th class="r">Kapitał</th><th class="r">Saldo</th><th class="r">Wynik</th><th class="r">Transakcje / gry</th><th class="r">Maks. obsunięcie</th><th>Kod wyniku</th><th class="r">Aktualizacja</th></tr></thead>`}
+function bRow(e,i,now,sel){
+    const isS=e.src==='server',on=BSEL.has(e.id);
+    const status=e.status==='done'?'<span class="pill idle">zakończył</span>':e.online?'<span class="pill ok">w grze</span>':isS?'<span class="pill warn" title="Brak zapisu od ponad 2 minut, a gra nie została zakończona">przerwana</span>':'<span class="pill warn">rozłączony</span>';
+    const ver=isS?srvVerCell(e):e.verified?'<span class="okv">zweryfikowany</span>':e.verified===false?'<span class="badv">niezgodny</span>':'<span class="muted">po zakończeniu</span>';
+    const retC=e.ret>0.005?'up':e.ret<-0.005?'down':'';
+    const hb=isS?`<button class="btn sm primary" type="button" data-det="${esc('srv|'+e.key)}">Cała historia</button>`:e.detail||e.pos||e.last?`<button class="btn sm${e.detail?' primary':''}" type="button" data-det="${esc(e.mode+'|'+e.seed+'|'+e.nick.toLowerCase())}">${e.detail?'Cała historia':'Pozycje na żywo'}</button>`:'<span class="hint">tylko wynik</span>';
+    return`<tr${sel&&on?' class="sel"':''}>${sel?`<td class="cks"><input type="checkbox" data-sel="${esc(e.id)}"${on?' checked':''} aria-label="Zaznacz: ${esc(e.nick)}"></td>`:''}<td class="num r">${i+1}</td><td><b>${esc(e.nick)}</b>${isS&&e.mach?`<br><span class="hint">${esc(e.mach)}</span>`:''}</td><td>${hb}</td><td><span class="chip">${MODEL[e.mode]}</span></td><td class="num">${esc(e.seed||'—')}</td><td>${status}</td>
+      <td class="num r">${e.start?fmtWhen(e.start):'—'}</td><td class="num r">${e.cap==null?'—':nf0.format(e.cap)+' zł'}</td><td class="num r">${e.eq==null?'—':nf0.format(e.eq)+' zł'}</td>
+      <td class="num r ${retC}"><b>${sgn(e.ret)}</b></td>
+      <td class="num r">${e.n==null?'—':nf0.format(e.n)}</td><td class="num r">${e.dd==null?'—':nf1.format(e.dd)+'%'}</td>
+      <td>${ver}${e.code?`<br><span class="num hint">${esc(e.code)}</span>`:''}</td><td class="num r">${ago(now-e.seen)}</td></tr>`}
+function bEmpty(n){return`<tr class="empty"><td colspan="${n}">${SRV.on?(SRV.pw&&SRV.loadedAt?'Na serwerze nie ma jeszcze sesji z wybranego dnia (albo żadna nie pasuje do filtrów). Pojawią się, gdy studenci zaczną grać.':'Wpisz hasło prowadzącego powyżej, żeby wczytać wyniki z serwera, albo wklej kody poniżej.'):'Jeszcze nie ma wyników. Pojawią się tu, gdy studenci zaczną sesję w tym artefakcie, albo wklej ich kody poniżej.'}</td></tr>`}
+let BGRP=[];
+function renderTables(r){
+  const now=Date.now(),ids=new Set(r.map(e=>e.id));for(const id of [...BSEL])if(!ids.has(id))BSEL.delete(id);
+  BGRP=groupsOf(r);
+  for(const t of document.querySelectorAll('#bView [data-bv]')){const on=t.dataset.bv===BVIEW;t.classList.toggle('on',on);t.setAttribute('aria-selected',on)}
+  $('#bGrpCnt').textContent=BGRP.length||'';$('#bDelBar').hidden=BVIEW!=='del';
+  let h;
+  if(BVIEW==='grp'){
+    h=BGRP.length?BGRP.map((g,gi)=>{const L=g.list,rs=L.filter(e=>e.ret!=null),avg=rs.length?rs.reduce((a,e)=>a+e.ret,0)/rs.length:null,dn=L.filter(e=>e.status==='done').length;
+      return`<section class="panel bgrp"><div class="ph"><h3>${esc(g.label)}</h3><span class="hint">${L.length} ${osob(L.length)} · średni wynik <b class="${avg>0?'up':avg<0?'down':''}">${sgn(avg)}</b> · na plusie ${rs.filter(e=>e.ret>0).length} · zakończyli ${dn}</span><button class="btn sm" type="button" data-gsel="${gi}">Zaznacz do usunięcia</button></div>
+        <div class="scroll"><table class="data">${bHead(false)}<tbody>${L.map((e,i)=>bRow(e,i,now,false)).join('')}</tbody></table></div></section>`}).join('')
+      :`<div class="panel"><div class="scroll"><table class="data">${bHead(false)}<tbody>${bEmpty(14)}</tbody></table></div></div>`;
+    h=`<p class="hint" style="margin:0">Osobny ranking dla każdej gry i każdej grupy osób, które zaczęły w ciągu 30 minut od pierwszej osoby w grupie (np. jedna lekcja). Najnowsze grupy na górze.</p>`+h;
+  }else{const sel=BVIEW==='del';
+    h=`<div class="panel"><div class="scroll"><table class="data">${bHead(sel,sel&&r.length>0&&r.every(e=>BSEL.has(e.id)))}<tbody>${r.length?r.map((e,i)=>bRow(e,i,now,sel)).join(''):bEmpty(sel?15:14)}</tbody></table></div></div>`}
+  $('#bTables').innerHTML=h;bSelUi(r);
+}
+function bSelUi(r){r=r||rows();const n=r.filter(e=>BSEL.has(e.id)).length,b=$('#bDelGo');
+  $('#bDelCnt').textContent=n||'';
+  if(!bDelArm||Date.now()-bDelArm>4000){b.textContent=n?`Usuń zaznaczone (${n})`:'Usuń zaznaczone';b.disabled=!n||bDelBusy}
+  const all=document.querySelector('#bTables [data-selall]');if(all){all.checked=r.length>0&&n===r.length;all.indeterminate=n>0&&n<r.length}
+  for(const c of document.querySelectorAll('#bTables [data-sel]')){c.checked=BSEL.has(c.dataset.sel);c.closest('tr').classList.toggle('sel',c.checked)}}
+let bDelArm=0,bDelBusy=false;
+$('#bView').addEventListener('click',ev=>{const t=ev.target.closest('[data-bv]');if(!t)return;BVIEW=t.dataset.bv;try{sessionStorage.setItem('dz-bview',BVIEW)}catch(e){}bDelArm=0;renderBoard()});
+$('#bTables').addEventListener('change',ev=>{const c=ev.target;
+  if(c.matches('[data-selall]')){for(const e of rows())c.checked?BSEL.add(e.id):BSEL.delete(e.id);bDelArm=0;bSelUi();return}
+  if(c.matches('[data-sel]')){c.checked?BSEL.add(c.dataset.sel):BSEL.delete(c.dataset.sel);bDelArm=0;bSelUi()}});
+$('#bTables').addEventListener('click',ev=>{const b=ev.target.closest('[data-gsel]');if(!b)return;const g=BGRP[+b.dataset.gsel];if(!g)return;
+  BSEL.clear();for(const e of g.list)BSEL.add(e.id);BVIEW='del';try{sessionStorage.setItem('dz-bview',BVIEW)}catch(e){}bDelArm=0;renderBoard();
+  const m=$('#bMsg');m.className='tk-msg';m.textContent=`Zaznaczono ${g.label}: ${g.list.length} ${wyn(g.list.length)}. Sprawdź listę i kliknij „Usuń zaznaczone”.`;$('#bDelBar').scrollIntoView({block:'nearest',behavior:'smooth'})});
+$('#bDelBar').addEventListener('click',async ev=>{const b=ev.target.closest('[data-bsel]');const r=rows();
+  if(b){const k=b.dataset.bsel;if(k==='none')BSEL.clear();else for(const e of r)if(k==='all'||(k==='stale'&&e.status!=='done'&&!e.online)||(k==='empty'&&!e.n))BSEL.add(e.id);bDelArm=0;bSelUi(r);return}
+  if(ev.target.closest('#bDelGo'))bDelete(r)});
+async function bDelete(r){
+  const ids=r.filter(e=>BSEL.has(e.id)).map(e=>e.id),btn=$('#bDelGo'),m=$('#bMsg');if(!ids.length||bDelBusy)return;
+  if(!bDelArm||Date.now()-bDelArm>4000){bDelArm=Date.now();btn.textContent=`Na pewno usunąć ${ids.length} ${wyn(ids.length)}? Kliknij ponownie`;setTimeout(()=>{if(bDelArm&&Date.now()-bDelArm>=4000){bDelArm=0;bSelUi()}},4100);return}
+  bDelArm=0;bDelBusy=true;btn.disabled=true;btn.textContent='Usuwam…';
+  const sk=ids.filter(i=>i.startsWith('srv|')).map(i=>i.slice(4)),lk=ids.filter(i=>i.startsWith('loc|')).map(i=>i.slice(4));let n=0;
+  try{for(let i=0;i<sk.length;i+=500){const part=sk.slice(i,i+500);await api('delete','POST',{keys:part});for(const k of part){delete SRV.items[k];delete SRV.det[k];BSEL.delete('srv|'+k)}n+=part.length}
+    for(const k of lk){delete B[k];BSEL.delete('loc|'+k)}if(lk.length)save();n+=lk.length;
+    m.className='tk-msg ok';m.textContent=`Usunięto ${n} ${wyn(n)}.`}
+  catch(err){m.className='tk-msg err';m.textContent=`Usunięto ${n} z ${ids.length}. ${err.message}`}
+  finally{bDelBusy=false;renderBoard()}
+}
 const ago=ms=>{const m=Math.floor(ms/60000);if(m<1)return'przed chwilą';if(m<60)return m+' min temu';return fmtWhen(Date.now()-ms)};
 function renderBoard(){
   if($('#board').hidden)return;
@@ -3154,25 +3252,14 @@ function renderBoard(){
   const sel=$('#bSeed'),cur=sel.value,seeds=[...new Set(Object.values(B).concat(srvRows()).map(e=>e.seed).filter(Boolean))].sort();
   sel.innerHTML='<option value="">Wszystkie</option>'+seeds.map(s=>`<option${s===cur?' selected':''}>${esc(s)}</option>`).join('');
   const r=rows(),now=Date.now();
-  $('#bBody').innerHTML=r.length?r.map((e,i)=>{
-    const isS=e.src==='server';
-    const status=e.status==='done'?'<span class="pill idle">zakończył</span>':e.online?'<span class="pill ok">w grze</span>':isS?'<span class="pill warn" title="Brak zapisu od ponad 2 minut, a gra nie została zakończona">przerwana</span>':'<span class="pill warn">rozłączony</span>';
-    const ver=isS?srvVerCell(e):e.verified?'<span class="okv">zweryfikowany</span>':e.verified===false?'<span class="badv">niezgodny</span>':'<span class="muted">po zakończeniu</span>';
-    const retC=e.ret>0.005?'up':e.ret<-0.005?'down':'';
-    const hb=isS?`<button class="btn sm primary" type="button" data-det="${esc('srv|'+e.key)}">Cała historia</button>`:e.detail||e.pos||e.last?`<button class="btn sm${e.detail?' primary':''}" type="button" data-det="${esc(e.mode+'|'+e.seed+'|'+e.nick.toLowerCase())}">${e.detail?'Cała historia':'Pozycje na żywo'}</button>`:'<span class="hint">tylko wynik</span>';
-    return`<tr><td class="num r">${i+1}</td><td><b>${esc(e.nick)}</b>${isS&&e.mach?`<br><span class="hint">${esc(e.mach)}</span>`:''}</td><td>${hb}</td><td><span class="chip">${MODEL[e.mode]}</span></td><td class="num">${esc(e.seed||'—')}</td><td>${status}</td>
-      <td class="num r">${e.cap==null?'—':nf0.format(e.cap)+' zł'}</td><td class="num r">${e.eq==null?'—':nf0.format(e.eq)+' zł'}</td>
-      <td class="num r ${retC}"><b>${e.ret==null?'—':(e.ret>0?'+':e.ret<0?'−':'')+nf1.format(Math.abs(e.ret))+'%'}</b></td>
-      <td class="num r">${e.n==null?'—':nf0.format(e.n)}</td><td class="num r">${e.dd==null?'—':nf1.format(e.dd)+'%'}</td>
-      <td>${ver}${e.code?`<br><span class="num hint">${esc(e.code)}</span>`:''}</td><td class="num r">${ago(now-e.seen)}</td></tr>`}).join('')
-    :`<tr class="empty"><td colspan="13">${SRV.on?(SRV.pw&&SRV.loadedAt?'Na serwerze nie ma jeszcze sesji z wybranego dnia. Pojawią się, gdy studenci zaczną grać.':'Wpisz hasło prowadzącego powyżej, żeby wczytać wyniki z serwera, albo wklej kody poniżej.'):'Jeszcze nie ma wyników. Pojawią się tu, gdy studenci zaczną sesję w tym artefakcie, albo wklej ich kody poniżej.'}</td></tr>`;
+  renderTables(r);
   $('#bGroup').innerHTML=groupHtml(r);
   const done=r.filter(e=>e.status==='done').length,avg=r.filter(e=>e.ret!=null);
   const mean=avg.length?avg.reduce((s,e)=>s+e.ret,0)/avg.length:null;
   $('#bSum').innerHTML=[[r.length,'uczestnicy'],[done,'zakończyli'],[mean==null?'—':(mean>0?'+':mean<0?'−':'')+nf1.format(Math.abs(mean))+'%','średni wynik',mean>0?'up':mean<0?'down':''],[avg.filter(e=>e.ret>0).length,'na plusie']]
     .map(([v,l,c])=>`<div class="fchip"><b class="${c||''}">${v}</b><span>${l}</span></div>`).join('');
 }
-$('#bBody').addEventListener('click',ev=>{const b=ev.target.closest('[data-det]');if(!b)return;if(b.dataset.det.startsWith('srv|')){srvOpen(b.dataset.det.slice(4),b);return}const e=B[b.dataset.det];if(!e)return;
+$('#bTables').addEventListener('click',ev=>{const b=ev.target.closest('[data-det]');if(!b)return;if(b.dataset.det.startsWith('srv|')){srvOpen(b.dataset.det.slice(4),b);return}const e=B[b.dataset.det];if(!e)return;
   detail(e.detail?{...e.detail,ok:!!e.verified}:{m:e.mode,nick:e.nick,seed:e.seed,cap:e.cap,eq:e.eq,n:e.n,tr:e.n,dd:e.dd,wag:e.wag,pos:e.pos,last:e.last})});
 setInterval(()=>{if($('#modal').hidden)renderBoard()},5000);
 window.DZLive={set,show,navTo,verify,pack,unpack,detail,myHistory,syncNav};

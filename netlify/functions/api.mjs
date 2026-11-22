@@ -8,6 +8,7 @@
  *   GET    /api/sessions?day=RRRR-MM-DD lista sesji z jednego dnia, `day=all` wszystkie (hasło)
  *   GET    /api/session?key=...         pełny zapis jednej sesji (hasło)
  *   DELETE /api/session?key=...         usunięcie jednej sesji (hasło)
+ *   POST   /api/delete {keys:[...]}     usunięcie wielu sesji naraz, do 1000 (hasło)
  *
  * Hasło prowadzącego ustawiasz w Netlify: Project configuration → Environment variables → ADMIN_PASSWORD.
  * Region danych: domyślnie eu-central-1 (Frankfurt). Zmienna BLOBS_REGION=auto zostawia wybór Netlify.
@@ -242,7 +243,7 @@ function meta(rec) {
     sid: rec.sid, cid: rec.cid, mode: rec.mode, nick: rec.nick, seed: rec.seed, status: rec.status,
     cap: num(p.cap), eq: num(p.eq), n: rec.mode === "cfd" ? num(p.tr) : num(p.n), wag: num(p.wag), dd: num(p.dd),
     code: cleanStr(p.code, 80), mach: cleanStr(p.machName, 40), mart: !!p.mart,
-    firstSeen: rec.firstSeen, updatedAt: rec.updatedAt, doneAt: rec.doneAt, saves: rec.saves,
+    start: rec.startedAt, firstSeen: rec.firstSeen, updatedAt: rec.updatedAt, doneAt: rec.doneAt, saves: rec.saves,
     chk: rec.check ? rec.check.ok : null, chkMsg: rec.check ? rec.check.msg : "", flags,
   };
 }
@@ -298,11 +299,14 @@ async function save(req) {
     if (prev.nick && prev.nick !== nick) flags.zmianaImienia = `${prev.nick} → ${nick}`;
     if (prev.seed && prev.seed !== seed) flags.zmianaKoduGry = `${prev.seed} → ${seed}`;
   }
-  const startedAt = typeof b.startedAt === "string" && Number.isFinite(Date.parse(b.startedAt)) ? b.startedAt.slice(0, 30) : now;
+  /* godzina startu z przeglądarki, ale nie później niż pierwszy zapis i nie wcześniej niż 12 h przed nim */
+  const firstSeen = (prev && prev.firstSeen) || now;
+  const fsT = Date.parse(firstSeen), saT = typeof b.startedAt === "string" ? Date.parse(b.startedAt) : NaN;
+  const startedAt = Number.isFinite(saT) && saT <= fsT + 60e3 && saT >= fsT - 12 * 36e5 ? new Date(saT).toISOString() : firstSeen;
   const rec = {
     v: 1, key, sid, cid: (prev && prev.cid) || cid, mode, nick, seed, status,
     startedAt: (prev && prev.startedAt) || startedAt,
-    firstSeen: (prev && prev.firstSeen) || now,
+    firstSeen,
     updatedAt: now,
     doneAt: status === "done" ? now : null,
     saves: ((prev && prev.saves) || 0) + 1,
@@ -334,6 +338,17 @@ async function sessions(url) {
   });
   return json({ ok: true, day, today: todayPL(), items: items.filter(Boolean) });
 }
+async function removeMany(req) {
+  let b;
+  try { b = JSON.parse(await req.text()); } catch (e) { return fail("Niepoprawny JSON."); }
+  const keys = [...new Set(Array.isArray(b && b.keys) ? b.keys.map(String) : [])];
+  if (!keys.length) return fail("Nie wybrano sesji do usunięcia.");
+  if (keys.length > 1000) return fail("Najwyżej 1000 sesji naraz.");
+  if (!keys.every((k) => KEY_RE.test(k))) return fail("Niepoprawny klucz sesji.");
+  const st = store();
+  await pool(keys, 16, (k) => st.delete(k));
+  return json({ ok: true, deleted: keys.length });
+}
 async function session(req, url) {
   const key = url.searchParams.get("key") || "";
   if (!KEY_RE.test(key)) return fail("Niepoprawny klucz sesji.");
@@ -353,6 +368,7 @@ export default async (req) => {
     if (route === "save" && req.method === "POST") return await save(req);
     if (route === "days" && req.method === "GET") return (await auth(req)) || (await days());
     if (route === "sessions" && req.method === "GET") return (await auth(req)) || (await sessions(url));
+    if (route === "delete" && req.method === "POST") return (await auth(req)) || (await removeMany(req));
     if (route === "session" && (req.method === "GET" || req.method === "DELETE")) return (await auth(req)) || (await session(req, url));
     return fail("Nie ma takiego adresu.", 404);
   } catch (e) {
